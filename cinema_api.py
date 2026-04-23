@@ -116,11 +116,25 @@ def api_statut():
     })
 
 @app.route('/api/monitoring/demarrer', methods=['POST'])
-def api_demarrer():
-    if not app.monitoring_actif:
-        app.monitoring_actif = True
-        threading.Thread(target=monitoring_thread, daemon=True).start()
-    return jsonify({"succes": True})
+def api_demarrer_monitoring():
+    """Démarre le monitoring continu"""
+    if app.monitoring_actif:
+        return jsonify({"succes": False, "message": "Monitoring déjà actif"})
     
+    app.monitoring_actif = True
+    thread = threading.Thread(target=monitoring_thread, daemon=True)
+    thread.start()
+    
+    return jsonify({"succes": True, "message": "Monitoring démarré"})
+
+def envoyer_discord(message):
+    """Envoie une notification sur ton téléphone via Discord"""
+    payload = {"content": message}
+    try:
+        import requests
+        requests.post(URL_DISCORD, json=payload, timeout=10)
+    except Exception as e:
+        print(f"❌ Erreur Discord : {e}")
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=False)
