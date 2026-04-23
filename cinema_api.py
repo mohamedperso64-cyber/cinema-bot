@@ -121,6 +121,6 @@ def api_demarrer():
         app.monitoring_actif = True
         threading.Thread(target=monitoring_thread, daemon=True).start()
     return jsonify({"succes": True})
-
+    
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
