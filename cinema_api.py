@@ -106,7 +106,7 @@ def monitoring_thread():
 @app.route('/')
 def index():
     """Page d'accueil - Envoie un test Discord à chaque visite"""
-    message_test = "✅ Connexion établie ! Le robot de Mohamed est prêt à surveiller les places."
+    message_test = "✅ Connexion établie ! Le bot de réservation est prêt à surveiller les places."
     envoyer_discord(message_test)
     return "<h1>Test Discord envoyé ! Vérifie ton salon Discord.</h1>"
 
