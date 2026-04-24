@@ -97,9 +97,9 @@ def monitoring_thread():
         
         # --- LOGIQUE DE L'ALERTE DU 28 AVRIL ---
         # Si on est le 28 avril et qu'on n'a pas encore envoyé le rappel
-        if maintenant.month == 4 and maintenant.day == 28 and not alerte_rappel_envoyee:
+        if maintenant.month == 4 and maintenant.day == 24 and not alerte_rappel_envoyee:
             message_rappel = (
-                "🔔 **RAPPEL J-1** : Mohamed, demain les réservations ouvrent !\n"
+                "🔔 **RAPPEL J-1** : Demain les réservations ouvrent !\n"
                 "✅ Le script fonctionne parfaitement et est prêt pour demain."
             )
             envoyer_discord(message_rappel)
