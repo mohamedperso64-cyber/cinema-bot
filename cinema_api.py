@@ -88,65 +88,35 @@ def sauvegarder_rapport(resultats):
         json.dump(resultats, f, ensure_ascii=False, indent=2)
 
 def monitoring_thread():
-    """Tâche en arrière-plan avec alerte de rappel le 28 avril"""
+    """Tâche en arrière-plan avec alerte de rappel"""
     alerte_rappel_envoyee = False
     
     while app.monitoring_actif:
         maintenant = datetime.now()
-        print(f"[{maintenant.strftime('%H:%M:%S')}] Vérification...")
-        
-        # --- LOGIQUE DE L'ALERTE DU 28 AVRIL ---
-        # Si on est le 28 avril et qu'on n'a pas encore envoyé le rappel
+        # TEST : On vérifie si on est le 24 (aujourd'hui) au lieu du 28
+        # Remplace le 24 par 28 après ton test réussi !
         if maintenant.month == 4 and maintenant.day == 24 and not alerte_rappel_envoyee:
-            message_rappel = (
-                "🔔 **RAPPEL J-1** : Demain les réservations ouvrent !\n"
-                "✅ Le script fonctionne parfaitement et est prêt pour demain."
-            )
+            message_rappel = "🔔 **TEST RÉUSSI** : Mohamed, le script est prêt pour le rappel du 28 avril !"
             envoyer_discord(message_rappel)
             alerte_rappel_envoyee = True
-        # ---------------------------------------
 
         resultats = lancer_verification()
-        app.dernier_rapport = {
-            "timestamp": maintenant.isoformat(),
-            "resultats": resultats
-        }
-        
-        # Sauvegarde et historique
-        sauvegarder_rapport(resultats)
-        app.historique.append(app.dernier_rapport)
-        if len(app.historique) > 100:
-            app.historique.pop(0)
-        
-        # Pause : 1h si on attend encore, 30min si on est proche/après le 29
-        pause = 3600 if date.today() < OUVERTURE_RESERVATIONS else 1800
-        
-        for _ in range(pause):
-            if not app.monitoring_actif:
-                break
-            time.sleep(1)
+        app.dernier_rapport = {"timestamp": maintenant.isoformat(), "resultats": resultats}
+        time.sleep(60) # Pause courte pour le test
 
-# --- ROUTES API ---
 @app.route('/')
 def index():
-    """Page d'accueil - Envoie un test Discord à chaque visite"""
-    message_test = "✅ Connexion établie ! Le bot de réservation est prêt à surveiller les places."
-    envoyer_discord(message_test)
-    return "<h1>Test Discord envoyé ! Vérifie ton salon Discord.</h1>"
+    """Page de test immédiat"""
+    envoyer_discord("🔌 Le serveur de Mohamed vient de démarrer !")
+    return "<h1>Robot en ligne ! Vérifie ton Discord.</h1>"
 
-@app.route('/api/statut')
-def api_statut():
-    return jsonify({
-        "jours_restants": jours_restants(OUVERTURE_RESERVATIONS),
-        "monitoring_actif": app.monitoring_actif,
-        "dernier_rapport": app.dernier_rapport
-    })
-
-@app.route('/api/monitoring/demarrer', methods=['POST'])
+@app.route('/api/monitoring/demarrer', methods=['GET', 'POST'])
 def api_demarrer_monitoring():
-    """Démarre le monitoring continu"""
-    if app.monitoring_actif:
-        return jsonify({"succes": False, "message": "Monitoring déjà actif"})
+    """Autorise le lancement via un simple clic sur le lien"""
+    if not app.monitoring_actif:
+        app.monitoring_actif = True
+        threading.Thread(target=monitoring_thread, daemon=True).start()
+    return jsonify({"succes": True, "message": "Monitoring lance !"})
     
     app.monitoring_actif = True
     thread = threading.Thread(target=monitoring_thread, daemon=True)
