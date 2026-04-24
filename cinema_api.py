@@ -105,7 +105,10 @@ def monitoring_thread():
 # --- ROUTES API ---
 @app.route('/')
 def index():
-    return "<h1>Monitor TADC Actif 🎬</h1><p>Le serveur tourne en arrière-plan.</p>"
+    """Page d'accueil - Envoie un test Discord à chaque visite"""
+    message_test = "✅ Connexion établie ! Le robot de Mohamed est prêt à surveiller les places."
+    envoyer_discord(message_test)
+    return "<h1>Test Discord envoyé ! Vérifie ton salon Discord.</h1>"
 
 @app.route('/api/statut')
 def api_statut():
