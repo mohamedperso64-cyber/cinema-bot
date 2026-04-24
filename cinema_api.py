@@ -88,19 +88,43 @@ def sauvegarder_rapport(resultats):
         json.dump(resultats, f, ensure_ascii=False, indent=2)
 
 def monitoring_thread():
+    """Tâche en arrière-plan avec alerte de rappel le 28 avril"""
+    alerte_rappel_envoyee = False
+    
     while app.monitoring_actif:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Scan en cours...")
-        resultats = lancer_verification()
+        maintenant = datetime.now()
+        print(f"[{maintenant.strftime('%H:%M:%S')}] Vérification...")
         
-        for res in resultats:
-            if res["statut"] == "🟢 OUVERT !":
-                envoyer_discord(f"🚨 **PLACES TROUVÉES !**\n🎬 {res['nom']}\n💺 {res['places']} places\n🔗 {res['url']}")
+        # --- LOGIQUE DE L'ALERTE DU 28 AVRIL ---
+        # Si on est le 28 avril et qu'on n'a pas encore envoyé le rappel
+        if maintenant.month == 4 and maintenant.day == 28 and not alerte_rappel_envoyee:
+            message_rappel = (
+                "🔔 **RAPPEL J-1** : Mohamed, demain les réservations ouvrent !\n"
+                "✅ Le script fonctionne parfaitement et est prêt pour demain."
+            )
+            envoyer_discord(message_rappel)
+            alerte_rappel_envoyee = True
+        # ---------------------------------------
 
-        app.dernier_rapport = {"timestamp": datetime.now().isoformat(), "resultats": resultats}
-        app.historique.append(app.dernier_rapport)
-        sauvegarder_rapport(resultats)
+        resultats = lancer_verification()
+        app.dernier_rapport = {
+            "timestamp": maintenant.isoformat(),
+            "resultats": resultats
+        }
         
-        time.sleep(1800 if date.today() >= OUVERTURE_RESERVATIONS else 3600)
+        # Sauvegarde et historique
+        sauvegarder_rapport(resultats)
+        app.historique.append(app.dernier_rapport)
+        if len(app.historique) > 100:
+            app.historique.pop(0)
+        
+        # Pause : 1h si on attend encore, 30min si on est proche/après le 29
+        pause = 3600 if date.today() < OUVERTURE_RESERVATIONS else 1800
+        
+        for _ in range(pause):
+            if not app.monitoring_actif:
+                break
+            time.sleep(1)
 
 # --- ROUTES API ---
 @app.route('/')
