@@ -95,7 +95,7 @@ def monitoring_thread():
         maintenant = datetime.now()
         # TEST : On vérifie si on est le 24 (aujourd'hui) au lieu du 28
         # Remplace le 24 par 28 après ton test réussi !
-        if maintenant.month == 4 and maintenant.day == 24 and not alerte_rappel_envoyee:
+        if maintenant.month == 4 and maintenant.day == 28 and not alerte_rappel_envoyee:
             message_rappel = "🔔 **TEST RÉUSSI** : Mohamed, le script est prêt pour le rappel du 28 avril !"
             envoyer_discord(message_rappel)
             alerte_rappel_envoyee = True
