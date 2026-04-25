@@ -74,23 +74,6 @@ MES_CINEMAS = [
     },
 ]
 
-# Sélecteurs génériques utilisés en dernier recours sur tous les sites
-SELECTEURS_GENERIQUES = [
-    # Texte dans les liens/boutons
-    "a:has-text('Réserver')",
-    "a:has-text('Acheter')",
-    "a:has-text('Voir les séances')",
-    "button:has-text('Réserver')",
-    "button:has-text('Acheter')",
-    # Patterns d'URL communs
-    "a[href*='reservation']",
-    "a[href*='billet']",
-    "a[href*='ticket']",
-    "a[href*='booking']",
-    "a[href*='seance']",
-    "a[href*='achat']",
-]
-
 # --- ÉTAT GLOBAL ---
 app.monitoring_actif = False
 app.dernier_rapport = None
@@ -295,6 +278,17 @@ def api_statut():
         return "<h1>Aucun rapport disponible. Lance d'abord /api/test-rapport</h1>"
     lignes = [f"{r['nom']} → {r['statut']} {r.get('detail', '')}" for r in app.dernier_rapport["resultats"]]
     return f"<h1>Dernier scan : {app.dernier_rapport['timestamp']}</h1><pre>" + "\n".join(lignes) + "</pre>"
+
+@app.route('/api/test-rapport')
+def api_test_rapport():
+    try:
+        resultats = lancer_verification()
+        envoyer_discord(formater_rapport_discord(resultats))
+        sauvegarder_rapport(resultats)
+        lignes = [f"{r['nom']} → {r['statut']} {r['detail']}" for r in resultats]
+        return "<h1>✅ Rapport réel envoyé !</h1><pre>" + "\n".join(lignes) + "</pre>"
+    except Exception as e:
+        return f"<h1>❌ Erreur</h1><pre>{e}</pre>", 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
