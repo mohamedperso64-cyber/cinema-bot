@@ -70,7 +70,7 @@ def envoyer_discord(message):
         print(f"❌ Erreur Discord : {e}")
 
 def formater_rapport_discord(resultats):
-    tableau = "🚨 **MISE À JOUR BILLETTERIE** 🚨\n\n"
+    tableau = "🚨 **MISE À JOUR DE LA BILLETTERIE** 🚨\n\n"
     tableau += "```text\n"
     tableau += f"{'CINÉMA':<18} | {'STATUT':<16} | INFOS\n"
     tableau += "-" * 55 + "\n"
@@ -152,7 +152,7 @@ def monitoring_thread():
         maintenant = datetime.now()
 
         if maintenant.date() == date(2026, 4, 28) and not alerte_rappel_envoyee:
-            envoyer_discord("🔔 **RAPPEL J-1** : Mohamed, le script est en ligne et prêt pour demain !")
+            envoyer_discord("🔔 **RAPPEL J-1** : ATTENTION : le script est en ligne et prêt pour demain !")
             alerte_rappel_envoyee = True
 
         resultats = lancer_verification()
@@ -173,7 +173,7 @@ def monitoring_thread():
 # --- ROUTES ---
 @app.route('/')
 def index():
-    envoyer_discord("🔌 Le serveur de Mohamed est bien en ligne !")
+    envoyer_discord("🔌 Le serveur est bien en ligne !")
     return "<h1>Robot en ligne ! Vérifie ton Discord.</h1>"
 
 @app.route('/api/monitoring/demarrer', methods=['GET', 'POST'])
