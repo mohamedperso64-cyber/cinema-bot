@@ -6,14 +6,13 @@ from pathlib import Path
 import json
 import threading
 import time
-import random
 
 app = Flask(__name__)
 app.config['JSON_SORT_KEYS'] = False
 
 # --- CONFIGURATION ---
 LE_FILM = "The Amazing Digital Circus"
-# Sur Render, on utilise /tmp pour l'écriture de fichiers temporaires si besoin
+# Sur Render, on utilise /tmp pour l'écriture de fichiers temporaires
 RAPPORT_DIR = Path("/tmp/Cinema_Reports") 
 RAPPORT_DIR.mkdir(exist_ok=True)
 
@@ -43,10 +42,38 @@ def formater_jours_restants(jours):
     return f"📅 Dans {jours} jours"
 
 def envoyer_discord(message):
+    """Envoie une notification sur ton téléphone via Discord"""
     try:
         requests.post(URL_DISCORD, json={"content": message}, timeout=10)
     except Exception as e:
         print(f"❌ Erreur Discord : {e}")
+
+def formater_rapport_discord(resultats):
+    """Génère le tableau avec des liens directs vers les cinémas"""
+    tableau = "🚨 **MISE À JOUR BILLETTERIE** 🚨\n\n"
+    tableau += "```text\n"
+    tableau += f"{'CINÉMA':<18} | {'STATUT':<12} | {'PLACES'}\n"
+    tableau += "-" * 45 + "\n"
+    
+    liens = []
+    for cine in resultats:
+        nom = cine['nom'][:18]
+        statut = cine['statut']
+        places = cine['places'] if cine['places'] > 0 else "---"
+        
+        tableau += f"{nom:<18} | {statut:<12} | {places}\n"
+        
+        if "OUVERT" in statut:
+            liens.append(f"🔗 [Réserver à {nom}]({cine['url']})")
+    
+    tableau += "```\n"
+    
+    if liens:
+        tableau += "\n**RÉSERVEZ ICI :**\n" + "\n".join(liens)
+    else:
+        tableau += "\n*Aucun lien de réservation disponible pour le moment.*"
+        
+    return tableau
 
 # --- CŒUR DU ROBOT ---
 def verifier_cinema(browser, cine):
@@ -88,50 +115,67 @@ def sauvegarder_rapport(resultats):
         json.dump(resultats, f, ensure_ascii=False, indent=2)
 
 def monitoring_thread():
-    """Tâche en arrière-plan avec alerte de rappel"""
+    """Tâche en arrière-plan (Moteur de recherche)"""
     alerte_rappel_envoyee = False
+    alerte_places_envoyee = False # Évite de te spammer toutes les 30 minutes le jour J
     
     while app.monitoring_actif:
         maintenant = datetime.now()
-        # TEST : On vérifie si on est le 24 (aujourd'hui) au lieu du 28
-        # Remplace le 24 par 28 après ton test réussi !
+        
+        # 1. Alerte de rappel la veille
         if maintenant.month == 4 and maintenant.day == 28 and not alerte_rappel_envoyee:
-            message_rappel = "🔔 **TEST RÉUSSI** : Mohamed, le script est prêt pour le rappel du 28 avril !"
+            message_rappel = "🔔 **RAPPEL J-1** : Mohamed, le script est en ligne et prêt pour demain !"
             envoyer_discord(message_rappel)
             alerte_rappel_envoyee = True
 
+        # 2. Le robot scanne les cinémas
         resultats = lancer_verification()
         app.dernier_rapport = {"timestamp": maintenant.isoformat(), "resultats": resultats}
-        time.sleep(60) # Pause courte pour le test
+        sauvegarder_rapport(resultats)
+        
+        # 3. Vérification si les places sont disponibles le 29
+        des_places_dispos = any(cine['statut'] == "🟢 OUVERT !" for cine in resultats)
+        if des_places_dispos and not alerte_places_envoyee:
+            # Envoi du beau tableau récapitulatif !
+            rapport_complet = formater_rapport_discord(resultats)
+            envoyer_discord(rapport_complet)
+            alerte_places_envoyee = True 
 
+        # 4. Pause entre chaque vérification
+        # Pause d'1 heure avant le 29, puis 30 minutes le jour J
+        pause = 1800 if date.today() >= OUVERTURE_RESERVATIONS else 3600
+        for _ in range(pause):
+            if not app.monitoring_actif:
+                break
+            time.sleep(1)
+
+# --- ROUTES API ---
 @app.route('/')
 def index():
-    """Page de test immédiat"""
-    envoyer_discord("🔌 Le serveur de Mohamed vient de démarrer !")
+    """Page de test immédiat (Ping Discord à chaque ouverture)"""
+    envoyer_discord("🔌 Le serveur de Mohamed est bien en ligne !")
     return "<h1>Robot en ligne ! Vérifie ton Discord.</h1>"
 
 @app.route('/api/monitoring/demarrer', methods=['GET', 'POST'])
 def api_demarrer_monitoring():
-    """Autorise le lancement via un simple clic sur le lien"""
+    """Lancement via un clic sur le lien"""
     if not app.monitoring_actif:
         app.monitoring_actif = True
         threading.Thread(target=monitoring_thread, daemon=True).start()
-    return jsonify({"succes": True, "message": "Monitoring lance !"})
-    
-    app.monitoring_actif = True
-    thread = threading.Thread(target=monitoring_thread, daemon=True)
-    thread.start()
-    
-    return jsonify({"succes": True, "message": "Monitoring démarré"})
+        return "<h1>✅ Monitoring démarré !</h1><p>Le robot surveille maintenant en arrière-plan.</p>"
+    return "<h1>ℹ️ Déjà actif</h1><p>Le robot tourne déjà !</p>"
 
-def envoyer_discord(message):
-    """Envoie une notification sur ton téléphone via Discord"""
-    payload = {"content": message}
-    try:
-        import requests
-        requests.post(URL_DISCORD, json=payload, timeout=10)
-    except Exception as e:
-        print(f"❌ Erreur Discord : {e}")
+@app.route('/api/test-rapport')
+def api_test_rapport():
+    """Test pour générer et voir le design du tableau sur Discord"""
+    resultats_fictifs = [
+        {"nom": "Pathé Bellecour", "statut": "🟢 OUVERT !", "places": 142, "url": "https://www.pathe.fr/"},
+        {"nom": "UGC Part-Dieu", "statut": "🟢 OUVERT !", "places": 12, "url": "https://www.ugc.fr/"},
+        {"nom": "Pathé Vaise", "statut": "🔴 Complet", "places": 0, "url": "https://www.pathe.fr/"}
+    ]
+    message_test = formater_rapport_discord(resultats_fictifs)
+    envoyer_discord(message_test)
+    return "<h1>✅ Faux rapport envoyé !</h1><p>Va vite regarder ton salon Discord pour voir le résultat.</p>"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
