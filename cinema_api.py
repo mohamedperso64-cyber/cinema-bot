@@ -264,23 +264,6 @@ def api_demarrer_monitoring():
 
 @app.route('/api/test-rapport')
 def api_test_rapport():
-    """Teste le scraping réel sur tous les cinémas de MES_CINEMAS et envoie le résultat sur Discord"""
-    resultats = lancer_verification()
-    envoyer_discord(formater_rapport_discord(resultats))
-    sauvegarder_rapport(resultats)
-    lignes = [f"{r['nom']} → {r['statut']} {r['detail']}" for r in resultats]
-    return "<h1>✅ Rapport réel envoyé !</h1><pre>" + "\n".join(lignes) + "</pre>"
-
-@app.route('/api/statut')
-def api_statut():
-    """Voir le dernier rapport sans relancer un scan"""
-    if not app.dernier_rapport:
-        return "<h1>Aucun rapport disponible. Lance d'abord /api/test-rapport</h1>"
-    lignes = [f"{r['nom']} → {r['statut']} {r.get('detail', '')}" for r in app.dernier_rapport["resultats"]]
-    return f"<h1>Dernier scan : {app.dernier_rapport['timestamp']}</h1><pre>" + "\n".join(lignes) + "</pre>"
-
-@app.route('/api/test-rapport')
-def api_test_rapport():
     try:
         resultats = lancer_verification()
         envoyer_discord(formater_rapport_discord(resultats))
@@ -289,6 +272,14 @@ def api_test_rapport():
         return "<h1>✅ Rapport réel envoyé !</h1><pre>" + "\n".join(lignes) + "</pre>"
     except Exception as e:
         return f"<h1>❌ Erreur</h1><pre>{e}</pre>", 500
+
+@app.route('/api/statut')
+def api_statut():
+    """Voir le dernier rapport sans relancer un scan"""
+    if not app.dernier_rapport:
+        return "<h1>Aucun rapport disponible. Lance d'abord /api/test-rapport</h1>"
+    lignes = [f"{r['nom']} → {r['statut']} {r.get('detail', '')}" for r in app.dernier_rapport["resultats"]]
+    return f"<h1>Dernier scan : {app.dernier_rapport['timestamp']}</h1><pre>" + "\n".join(lignes) + "</pre>"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
