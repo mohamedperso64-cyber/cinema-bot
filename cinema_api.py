@@ -1,5 +1,5 @@
 import requests
-from flask import Flask, render_template, jsonify, request
+from flask import Flask
 from playwright.sync_api import sync_playwright
 from datetime import datetime, date
 from pathlib import Path
@@ -12,24 +12,88 @@ app.config['JSON_SORT_KEYS'] = False
 
 # --- CONFIGURATION ---
 LE_FILM = "The Amazing Digital Circus"
-# Sur Render, on utilise /tmp pour l'écriture de fichiers temporaires
-RAPPORT_DIR = Path("/tmp/Cinema_Reports") 
+RAPPORT_DIR = Path("/tmp/Cinema_Reports")
 RAPPORT_DIR.mkdir(exist_ok=True)
 
 OUVERTURE_RESERVATIONS = date(2026, 4, 29)
 URL_DISCORD = "https://discord.com/api/webhooks/1496953878548316251/OFvdHjfLHdP-KV87NpU41rdFBXBi7zLQPvi-uaE0fGzR2LbLrlwJMbVzCKIkf3RgalJc"
 
+# Chaque cinéma a ses propres sélecteurs CSS pour détecter l'ouverture des réservations
 MES_CINEMAS = [
-    {"nom": "Pathé", "url": "https://www.pathe.fr/films/the-amazing-digital-circus-acte-final-52454"},
-    {"nom": "UGC", "url": "https://www.ugc.fr/film_the_amazing_digital_circus_18144.html"},
-    {"nom": "Le Grand Rex", "url": "https://www.legrandrex.com/cinema/5457"},
-    {"nom": "CGR", "url": "https://www.cgrcinemas.fr/films-a-l-affiche/1000042614-the-amazing-digital-circus-acte-final/"},
+    {
+        "nom": "Pathé",
+        "url": "https://www.pathe.fr/films/the-amazing-digital-circus-acte-final-52454",
+        # Boutons de séances ou liens de réservation Pathé
+        "selecteurs": [
+            "a[href*='seance']",
+            "a[href*='reservation']",
+            "button[class*='booking']",
+            ".schedule-item",
+            "[data-testid*='showtime']",
+            "a[class*='showtime']",
+        ]
+    },
+    {
+        "nom": "UGC",
+        "url": "https://www.ugc.fr/film_the_amazing_digital_circus_18144.html",
+        # UGC affiche des blocs de séances avec des liens d'achat
+        "selecteurs": [
+            "a[href*='achat']",
+            "a[href*='seance']",
+            ".seance",
+            ".showtime",
+            "button[class*='reserver']",
+            "[class*='session']",
+        ]
+    },
+    {
+        "nom": "Le Grand Rex",
+        "url": "https://www.legrandrex.com/cinema/5457",
+        # Le Grand Rex utilise des boutons de réservation directs
+        "selecteurs": [
+            "a[href*='reservation']",
+            "a[href*='billet']",
+            ".btn-booking",
+            ".reservation",
+            "button[class*='book']",
+            "a[class*='ticket']",
+        ]
+    },
+    {
+        "nom": "CGR",
+        "url": "https://www.cgrcinemas.fr/films-a-l-affiche/1000042614-the-amazing-digital-circus-acte-final/",
+        # CGR affiche des séances avec des boutons d'achat
+        "selecteurs": [
+            "a[href*='seance']",
+            "a[href*='achat']",
+            ".seance-item",
+            ".schedule",
+            "button[class*='achat']",
+            "[class*='booking']",
+        ]
+    },
+]
+
+# Sélecteurs génériques utilisés en dernier recours sur tous les sites
+SELECTEURS_GENERIQUES = [
+    # Texte dans les liens/boutons
+    "a:has-text('Réserver')",
+    "a:has-text('Acheter')",
+    "a:has-text('Voir les séances')",
+    "button:has-text('Réserver')",
+    "button:has-text('Acheter')",
+    # Patterns d'URL communs
+    "a[href*='reservation']",
+    "a[href*='billet']",
+    "a[href*='ticket']",
+    "a[href*='booking']",
+    "a[href*='seance']",
+    "a[href*='achat']",
 ]
 
 # --- ÉTAT GLOBAL ---
 app.monitoring_actif = False
 app.dernier_rapport = None
-app.historique = []
 
 # --- FONCTIONS UTILES ---
 def jours_restants(date_cible):
@@ -42,69 +106,128 @@ def formater_jours_restants(jours):
     return f"📅 Dans {jours} jours"
 
 def envoyer_discord(message):
-    """Envoie une notification sur ton téléphone via Discord"""
     try:
         requests.post(URL_DISCORD, json={"content": message}, timeout=10)
     except Exception as e:
         print(f"❌ Erreur Discord : {e}")
 
 def formater_rapport_discord(resultats):
-    """Génère le tableau avec des liens directs vers les cinémas"""
     tableau = "🚨 **MISE À JOUR BILLETTERIE** 🚨\n\n"
     tableau += "```text\n"
-    tableau += f"{'CINÉMA':<18} | {'STATUT':<12} | {'PLACES'}\n"
-    tableau += "-" * 45 + "\n"
-    
+    tableau += f"{'CINÉMA':<18} | {'STATUT':<14} | INFOS\n"
+    tableau += "-" * 50 + "\n"
+
     liens = []
     for cine in resultats:
         nom = cine['nom'][:18]
         statut = cine['statut']
-        places = cine['places'] if cine['places'] > 0 else "---"
-        
-        tableau += f"{nom:<18} | {statut:<12} | {places}\n"
-        
-        if "OUVERT" in statut:
-            liens.append(f"🔗 [Réserver à {nom}]({cine['url']})")
-    
+        infos = cine.get('message', cine.get('detail', ''))
+
+        tableau += f"{nom:<18} | {statut:<14} | {infos}\n"
+        liens.append(f"🔗 [{cine['nom']}]({cine['url']})")
+
     tableau += "```\n"
-    
-    if liens:
-        tableau += "\n**RÉSERVEZ ICI :**\n" + "\n".join(liens)
-    else:
-        tableau += "\n*Aucun lien de réservation disponible pour le moment.*"
-        
+    tableau += "\n**LIENS DIRECTS :**\n" + "\n".join(liens)
+
     return tableau
 
 # --- CŒUR DU ROBOT ---
-def verifier_cinema(browser, cine):
-    page = browser.new_page()
-    resultat = {"nom": cine["nom"], "statut": "❓ Erreur", "places": 0, "timestamp": datetime.now().isoformat(), "url": cine["url"]}
-    try:
-        if date.today() < OUVERTURE_RESERVATIONS:
-            resultat["statut"] = "⏳ En attente"
-            resultat["message"] = formater_jours_restants(jours_restants(OUVERTURE_RESERVATIONS))
-            return resultat
+def verifier_cinema(page, cine):
+    resultat = {
+        "nom": cine["nom"],
+        "statut": "❓ Erreur",
+        "message": "",
+        "detail": "",
+        "timestamp": datetime.now().isoformat(),
+        "url": cine["url"]
+    }
 
-        page.goto(cine['url'], wait_until="networkidle", timeout=15000)
-        try: page.click("#didomi-notice-agree-button", timeout=2000)
-        except: pass
-        
-        sieges = page.query_selector_all(".seat-available, [data-available='true'], .libre, [class*='available']")
-        if len(sieges) > 0:
+    # Avant l'ouverture : pas besoin de scraper
+    jours = jours_restants(OUVERTURE_RESERVATIONS)
+    if date.today() < OUVERTURE_RESERVATIONS:
+        resultat["statut"] = "⏳ En attente"
+        resultat["message"] = formater_jours_restants(jours)
+        return resultat
+
+    try:
+        page.goto(cine['url'], wait_until="domcontentloaded", timeout=20000)
+
+        # Fermeture des bandeaux de cookies
+        for selecteur_cookies in [
+            "#didomi-notice-agree-button",
+            "#onetrust-accept-btn-handler",
+            "button[id*='accept']",
+            "button:has-text('Accepter')",
+            "button:has-text('Tout accepter')",
+        ]:
+            try:
+                page.click(selecteur_cookies, timeout=1500)
+                break
+            except:
+                pass
+
+        # Attente que la page finisse de charger ses éléments dynamiques
+        page.wait_for_timeout(2000)
+
+        elements_trouves = []
+
+        # 1. Sélecteurs spécifiques au cinéma
+        for selecteur in cine.get("selecteurs", []):
+            try:
+                elements = page.query_selector_all(selecteur)
+                if elements:
+                    elements_trouves.extend(elements)
+            except:
+                pass
+
+        # 2. Sélecteurs génériques en renfort
+        if not elements_trouves:
+            for selecteur in SELECTEURS_GENERIQUES:
+                try:
+                    elements = page.query_selector_all(selecteur)
+                    if elements:
+                        elements_trouves.extend(elements)
+                except:
+                    pass
+
+        if elements_trouves:
             resultat["statut"] = "🟢 OUVERT !"
-            resultat["places"] = len(sieges)
+            resultat["detail"] = f"{len(elements_trouves)} séance(s) trouvée(s)"
         else:
-            resultat["statut"] = "🔴 Complet"
+            # Dernier recours : chercher le texte "réserver" n'importe où dans la page
+            contenu = page.content().lower()
+            mots_cles = ["réserver", "acheter", "voir les séances", "choisir sa séance", "billetterie"]
+            mot_trouve = next((m for m in mots_cles if m in contenu), None)
+
+            if mot_trouve:
+                resultat["statut"] = "🟡 À vérifier"
+                resultat["detail"] = f'Mot-clé "{mot_trouve}" détecté'
+            else:
+                resultat["statut"] = "🔴 Pas encore dispo"
+                resultat["detail"] = "Aucune séance détectée"
+
     except Exception as e:
         resultat["statut"] = "❌ Erreur réseau"
-    finally:
-        page.close()
+        resultat["detail"] = str(e)[:40]
+
     return resultat
 
 def lancer_verification():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        resultats = [verifier_cinema(browser, cine) for cine in MES_CINEMAS]
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            locale="fr-FR"
+        )
+        resultats = []
+        for cine in MES_CINEMAS:
+            page = context.new_page()
+            try:
+                r = verifier_cinema(page, cine)
+                resultats.append(r)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] {cine['nom']} → {r['statut']} {r['detail']}")
+            finally:
+                page.close()
         browser.close()
     return resultats
 
@@ -115,68 +238,63 @@ def sauvegarder_rapport(resultats):
         json.dump(resultats, f, ensure_ascii=False, indent=2)
 
 def monitoring_thread():
-    """Tâche en arrière-plan (Moteur de recherche)"""
     alerte_rappel_envoyee = False
-    alerte_places_envoyee = False # Évite de te spammer toutes les 30 minutes le jour J
-    
+    alerte_places_envoyee = False
+
     while app.monitoring_actif:
         maintenant = datetime.now()
-        
-        # 1. Alerte de rappel la veille
-        if maintenant.month == 4 and maintenant.day == 28 and not alerte_rappel_envoyee:
-            message_rappel = "🔔 **RAPPEL J-1** : Mohamed, le script est en ligne et prêt pour demain !"
-            envoyer_discord(message_rappel)
+
+        # Alerte la veille
+        if maintenant.date() == date(2026, 4, 28) and not alerte_rappel_envoyee:
+            envoyer_discord("🔔 **RAPPEL J-1** : Mohamed, le script est en ligne et prêt pour demain !")
             alerte_rappel_envoyee = True
 
-        # 2. Le robot scanne les cinémas
         resultats = lancer_verification()
         app.dernier_rapport = {"timestamp": maintenant.isoformat(), "resultats": resultats}
         sauvegarder_rapport(resultats)
-        
-        # 3. Vérification si les places sont disponibles le 29
-        des_places_dispos = any(cine['statut'] == "🟢 OUVERT !" for cine in resultats)
-        if des_places_dispos and not alerte_places_envoyee:
-            # Envoi du beau tableau récapitulatif !
-            rapport_complet = formater_rapport_discord(resultats)
-            envoyer_discord(rapport_complet)
-            alerte_places_envoyee = True 
 
-        # 4. Pause entre chaque vérification
-        # Pause d'1 heure avant le 29, puis 30 minutes le jour J
+        des_places_dispos = any("OUVERT" in cine['statut'] for cine in resultats)
+        if des_places_dispos and not alerte_places_envoyee:
+            envoyer_discord(formater_rapport_discord(resultats))
+            alerte_places_envoyee = True
+
+        # 30 min le jour J, 1h avant
         pause = 1800 if date.today() >= OUVERTURE_RESERVATIONS else 3600
         for _ in range(pause):
             if not app.monitoring_actif:
                 break
             time.sleep(1)
 
-# --- ROUTES API ---
+# --- ROUTES ---
 @app.route('/')
 def index():
-    """Page de test immédiat (Ping Discord à chaque ouverture)"""
     envoyer_discord("🔌 Le serveur de Mohamed est bien en ligne !")
     return "<h1>Robot en ligne ! Vérifie ton Discord.</h1>"
 
 @app.route('/api/monitoring/demarrer', methods=['GET', 'POST'])
 def api_demarrer_monitoring():
-    """Lancement via un clic sur le lien"""
     if not app.monitoring_actif:
         app.monitoring_actif = True
         threading.Thread(target=monitoring_thread, daemon=True).start()
         return "<h1>✅ Monitoring démarré !</h1><p>Le robot surveille maintenant en arrière-plan.</p>"
-    return "<h1>ℹ️ Déjà actif</h1><p>Le robot tourne déjà !</p>"
+    return "<h1>ℹ️ Déjà actif</h1>"
 
 @app.route('/api/test-rapport')
 def api_test_rapport():
-    """Test pour générer et voir le design du tableau sur Discord"""
-    resultats_fictifs = [
-        {"nom": "Pathé",       "statut": "🟢 OUVERT !", "places": 142, "url": MES_CINEMAS[0]["url"]},
-        {"nom": "UGC",         "statut": "🟢 OUVERT !", "places": 12,  "url": MES_CINEMAS[1]["url"]},
-        {"nom": "Le Grand Rex","statut": "🔴 Complet",  "places": 0,   "url": MES_CINEMAS[2]["url"]},
-        {"nom": "CGR",         "statut": "🔴 Complet",  "places": 0,   "url": MES_CINEMAS[3]["url"]},
-    ]
-    message_test = formater_rapport_discord(resultats_fictifs)
-    envoyer_discord(message_test)
-    return "<h1>✅ Faux rapport envoyé !</h1><p>Va vite regarder ton salon Discord pour voir le résultat.</p>"
+    """Teste le scraping réel sur tous les cinémas de MES_CINEMAS et envoie le résultat sur Discord"""
+    resultats = lancer_verification()
+    envoyer_discord(formater_rapport_discord(resultats))
+    sauvegarder_rapport(resultats)
+    lignes = [f"{r['nom']} → {r['statut']} {r['detail']}" for r in resultats]
+    return "<h1>✅ Rapport réel envoyé !</h1><pre>" + "\n".join(lignes) + "</pre>"
+
+@app.route('/api/statut')
+def api_statut():
+    """Voir le dernier rapport sans relancer un scan"""
+    if not app.dernier_rapport:
+        return "<h1>Aucun rapport disponible. Lance d'abord /api/test-rapport</h1>"
+    lignes = [f"{r['nom']} → {r['statut']} {r.get('detail', '')}" for r in app.dernier_rapport["resultats"]]
+    return f"<h1>Dernier scan : {app.dernier_rapport['timestamp']}</h1><pre>" + "\n".join(lignes) + "</pre>"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
