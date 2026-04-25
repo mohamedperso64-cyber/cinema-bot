@@ -168,10 +168,9 @@ def api_demarrer_monitoring():
 @app.route('/api/test-rapport')
 def api_test_rapport():
     """Test pour générer et voir le design du tableau sur Discord"""
-    resultats_fictifs = [
-        {"nom": "Pathé Bellecour", "statut": "🟢 OUVERT !", "places": 142, "url": "https://www.pathe.fr/"},
-        {"nom": "UGC Part-Dieu", "statut": "🟢 OUVERT !", "places": 12, "url": "https://www.ugc.fr/"},
-        {"nom": "Pathé Vaise", "statut": "🔴 Complet", "places": 0, "url": "https://www.pathe.fr/"}
+     resultats_fictifs = [
+        {"nom": cine["nom"], "statut": "🟢 OUVERT !", "places": 42, "url": cine["url"]}
+        for cine in MES_CINEMAS
     ]
     message_test = formater_rapport_discord(resultats_fictifs)
     envoyer_discord(message_test)
