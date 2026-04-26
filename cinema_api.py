@@ -49,9 +49,22 @@ MOTS_CLES_FAIBLES = [
     "achat en ligne",
 ]
 
+MOTS_CLES_COMPLET = [
+    "complet",
+    "sold out",
+    "plus de places",
+    "épuisé",
+    "indisponible",
+    "no seats available",
+]
+
 # --- ÉTAT GLOBAL ---
 app.monitoring_actif = False
 app.dernier_rapport = None
+
+# Mémorise le dernier statut connu de chaque cinéma pour détecter les changements
+# Ex: {"Pathé": "🟢 OUVERT !", "UGC": "🔴 Complet", ...}
+app.etats_precedents = {}
 
 # --- FONCTIONS UTILES ---
 def jours_restants(date_cible):
@@ -70,7 +83,7 @@ def envoyer_discord(message):
         print(f"❌ Erreur Discord : {e}")
 
 def formater_rapport_discord(resultats):
-    tableau = "🚨 **MISE À JOUR DE LA BILLETTERIE** 🚨\n\n"
+    tableau = "🚨 **MISE À JOUR BILLETTERIE** 🚨\n\n"
     tableau += "```text\n"
     tableau += f"{'CINÉMA':<18} | {'STATUT':<16} | INFOS\n"
     tableau += "-" * 55 + "\n"
@@ -86,6 +99,41 @@ def formater_rapport_discord(resultats):
     tableau += "```\n"
     tableau += "\n**LIENS DIRECTS :**\n" + "\n".join(liens)
     return tableau
+
+def formater_alerte_changement(nom, ancien_statut, nouveau_statut, url):
+    """Génère un message Discord ciblé quand un cinéma change d'état"""
+
+    # Réouverture après complet (annulations !)
+    if "OUVERT" in nouveau_statut and ("Complet" in ancien_statut or "dispo" in ancien_statut):
+        return (
+            f"🔔 **PLACES LIBÉRÉES !**\n"
+            f"**{nom}** vient de repasser en disponible !\n"
+            f"Ancien statut : `{ancien_statut}` → Nouveau : `{nouveau_statut}`\n"
+            f"👉 Fonce réserver : {url}"
+        )
+
+    # Première ouverture
+    if "OUVERT" in nouveau_statut and "attente" in ancien_statut:
+        return (
+            f"🚀 **LES RÉSERVATIONS SONT OUVERTES !**\n"
+            f"**{nom}** accepte maintenant les réservations !\n"
+            f"👉 Réserve vite : {url}"
+        )
+
+    # Passage à complet
+    if "Complet" in nouveau_statut and "OUVERT" in ancien_statut:
+        return (
+            f"😢 **COMPLET**\n"
+            f"**{nom}** vient de passer en complet.\n"
+            f"Reste attentif, des places peuvent se libérer !"
+        )
+
+    # Changement générique
+    return (
+        f"ℹ️ **Changement détecté — {nom}**\n"
+        f"`{ancien_statut}` → `{nouveau_statut}`\n"
+        f"🔗 {url}"
+    )
 
 # --- CŒUR DU ROBOT ---
 def verifier_cinema(cine):
@@ -108,10 +156,15 @@ def verifier_cinema(cine):
         response.raise_for_status()
         contenu = response.text.lower()
 
-        mot_fort = next((m for m in MOTS_CLES_FORTS if m in contenu), None)
-        mot_faible = next((m for m in MOTS_CLES_FAIBLES if m in contenu), None)
+        mot_complet = next((m for m in MOTS_CLES_COMPLET if m in contenu), None)
+        mot_fort    = next((m for m in MOTS_CLES_FORTS   if m in contenu), None)
+        mot_faible  = next((m for m in MOTS_CLES_FAIBLES  if m in contenu), None)
 
-        if mot_fort:
+        # Priorité : complet > ouvert > ambigu > rien
+        if mot_complet and not mot_fort:
+            resultat["statut"] = "🔴 Complet"
+            resultat["detail"] = f'"{mot_complet}" détecté'
+        elif mot_fort:
             resultat["statut"] = "🟢 OUVERT !"
             resultat["detail"] = f'"{mot_fort}" détecté'
         elif mot_faible:
@@ -138,6 +191,30 @@ def verifier_cinema(cine):
 def lancer_verification():
     return [verifier_cinema(cine) for cine in MES_CINEMAS]
 
+def detecter_changements_et_alerter(resultats):
+    """Compare les nouveaux résultats avec les états précédents et envoie des alertes ciblées"""
+    for cine in resultats:
+        nom = cine["nom"]
+        nouveau_statut = cine["statut"]
+        ancien_statut = app.etats_precedents.get(nom)
+
+        # Premier scan : on mémorise sans alerter
+        if ancien_statut is None:
+            app.etats_precedents[nom] = nouveau_statut
+            continue
+
+        # Changement détecté
+        if ancien_statut != nouveau_statut:
+            # On ignore les changements vers/depuis les erreurs réseau
+            if "Erreur" in nouveau_statut or "Erreur" in ancien_statut:
+                app.etats_precedents[nom] = nouveau_statut
+                continue
+
+            message = formater_alerte_changement(nom, ancien_statut, nouveau_statut, cine["url"])
+            envoyer_discord(message)
+            print(f"[ALERTE] {nom} : {ancien_statut} → {nouveau_statut}")
+            app.etats_precedents[nom] = nouveau_statut
+
 def sauvegarder_rapport(resultats):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file = RAPPORT_DIR / f"rapport_{timestamp}.json"
@@ -146,25 +223,31 @@ def sauvegarder_rapport(resultats):
 
 def monitoring_thread():
     alerte_rappel_envoyee = False
-    alerte_places_envoyee = False
+    premier_rapport_ouverture_envoye = False
 
     while app.monitoring_actif:
         maintenant = datetime.now()
 
+        # Alerte la veille
         if maintenant.date() == date(2026, 4, 28) and not alerte_rappel_envoyee:
-            envoyer_discord("🔔 **RAPPEL J-1** : ATTENTION : le script est en ligne et prêt pour demain !")
+            envoyer_discord("🔔 **RAPPEL J-1** : Mohamed, le script est en ligne et prêt pour demain !")
             alerte_rappel_envoyee = True
 
         resultats = lancer_verification()
         app.dernier_rapport = {"timestamp": maintenant.isoformat(), "resultats": resultats}
         sauvegarder_rapport(resultats)
 
+        # Rapport global à la première ouverture
         des_places_dispos = any("OUVERT" in cine['statut'] for cine in resultats)
-        if des_places_dispos and not alerte_places_envoyee:
+        if des_places_dispos and not premier_rapport_ouverture_envoye:
             envoyer_discord(formater_rapport_discord(resultats))
-            alerte_places_envoyee = True
+            premier_rapport_ouverture_envoye = True
 
-        pause = 1800 if date.today() >= OUVERTURE_RESERVATIONS else 3600
+        # Alertes ciblées sur les changements d'état
+        detecter_changements_et_alerter(resultats)
+
+        # Avant ouverture : 1h | Jour J : 5 min (pour capter les annulations rapidement)
+        pause = 300 if date.today() >= OUVERTURE_RESERVATIONS else 3600
         for _ in range(pause):
             if not app.monitoring_actif:
                 break
@@ -173,7 +256,7 @@ def monitoring_thread():
 # --- ROUTES ---
 @app.route('/')
 def index():
-    envoyer_discord("🔌 Le serveur est bien en ligne !")
+    envoyer_discord("🔌 Le serveur de Mohamed est bien en ligne !")
     return "<h1>Robot en ligne ! Vérifie ton Discord.</h1>"
 
 @app.route('/api/monitoring/demarrer', methods=['GET', 'POST'])
