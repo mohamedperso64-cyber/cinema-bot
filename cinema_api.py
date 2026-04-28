@@ -253,6 +253,75 @@ def monitoring_thread():
                 break
             time.sleep(1)
 
+# --- ALLOCINÉ SÉANCES ---
+from allocineAPI.allocineAPI import allocineAPI
+
+# IDs Allociné de tes cinémas Paris
+# Lance d'abord /api/seances/chercher-ids pour les trouver si besoin
+ALLOCINE_CINEMAS = [
+    {"nom": "Pathé",        "id": None},  # à remplir après /api/seances/chercher-ids
+    {"nom": "UGC",          "id": None},
+    {"nom": "Le Grand Rex", "id": None},
+    {"nom": "CGR",          "id": None},
+]
+
+DATE_SEANCES = "2026-06-06"
+MOT_CLE_FILM = "digital circus"
+
+@app.route('/api/seances/chercher-ids')
+def api_chercher_ids():
+    """Liste tous les cinémas d'Île-de-France pour trouver les bons IDs"""
+    try:
+        api = allocineAPI()
+        # Paris = département 75
+        cinemas = list(api.get_cinema("departement-75056"))
+        lignes = [f"{c['id']} | {c['name']} | {c.get('address','')}" for c in cinemas]
+        return "<h1>Cinémas Paris</h1><pre>" + "\n".join(lignes) + "</pre>"
+    except Exception as e:
+        return f"<h1>Erreur</h1><pre>{e}</pre>", 500
+
+@app.route('/api/seances')
+def api_seances():
+    """Interroge Allociné pour les séances TADC le 6 juin"""
+    try:
+        api_alloc = allocineAPI()
+        resultats = []
+
+        for cine in ALLOCINE_CINEMAS:
+            if cine["id"] is None:
+                resultats.append(f"⚠️ {cine['nom']} : ID non configuré")
+                continue
+
+            seances = list(api_alloc.get_showtime(cine["id"], DATE_SEANCES))
+            films_tadc = [s for s in seances if MOT_CLE_FILM in s.get("title", "").lower()]
+
+            if films_tadc:
+                for film in films_tadc:
+                    horaires_vf = film.get("VF", [])
+                    horaires_vo = film.get("VO", [])
+                    horaires_vostfr = film.get("VOSTFR", [])
+                    ligne = f"✅ {cine['nom']} — {film['title']}\n"
+                    if horaires_vf:
+                        ligne += f"   VF : {', '.join(h[11:16] for h in horaires_vf)}\n"
+                    if horaires_vo:
+                        ligne += f"   VO : {', '.join(h[11:16] for h in horaires_vo)}\n"
+                    if horaires_vostfr:
+                        ligne += f"   VOSTFR : {', '.join(h[11:16] for h in horaires_vostfr)}\n"
+                    resultats.append(ligne)
+            else:
+                resultats.append(f"❌ {cine['nom']} : Aucune séance TADC trouvée pour le {DATE_SEANCES}")
+
+        # Envoie sur Discord si des séances sont trouvées
+        seances_trouvees = [r for r in resultats if r.startswith("✅")]
+        if seances_trouvees:
+            message = "🎪 **SÉANCES TADC DÉTECTÉES SUR ALLOCINÉ**\n\n" + "\n".join(seances_trouvees)
+            envoyer_discord(message)
+
+        return "<h1>Séances TADC</h1><pre>" + "\n".join(resultats) + "</pre>"
+
+    except Exception as e:
+        return f"<h1>Erreur</h1><pre>{e}</pre>", 500
+
 # --- ROUTES ---
 @app.route('/')
 def index():
