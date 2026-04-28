@@ -259,22 +259,20 @@ from allocineAPI.allocineAPI import allocineAPI
 # IDs Allociné de tes cinémas Paris
 # Lance d'abord /api/seances/chercher-ids pour les trouver si besoin
 ALLOCINE_CINEMAS = [
-    # Pathé — plusieurs salles Paris (TADC peut être dans l'une ou l'autre)
-    {"nom": "Pathé Wepler",       "id": "C0179"},
-    {"nom": "Pathé La Villette",  "id": "W7520"},
-    {"nom": "Pathé Beaugrenelle", "id": "W7502"},
-    {"nom": "Pathé Convention",   "id": "C0161"},
+    # Indépendants
+    {"nom": "Le Grand Rex",             "id": "C0065"},
+    # Pathé
+    {"nom": "Pathé Aéroville",          "id": "W9329"},
+    {"nom": "Pathé Porte de la Villette","id": "W7520"},
+    {"nom": "Pathé Montparnasse",        "id": "C0158"},
 
-    # UGC — les plus grandes salles Paris
-    {"nom": "UGC Ciné Cité Bercy",    "id": "C0026"},
-    {"nom": "UGC Ciné Cité Les Halles","id": "C0159"},
-    {"nom": "UGC Ciné Cité Paris 19", "id": "W7509"},
+    # UGC
+    {"nom": "UGC Châtelet Les Halles",  "id": "C0159"},
+    {"nom": "UGC Montparnasse",         "id": "C0103"},
 
-    # Le Grand Rex
-    {"nom": "Le Grand Rex", "id": "C0065"},
-
-    # CGR Paris Lilas
-    {"nom": "CGR Paris Lilas", "id": "W7519"},
+    # CGR
+    {"nom": "CGR Sarcelles",            "id": "P9520"},
+    {"nom": "CGR Paris Lilas",          "id": "W7519"}
 ]
 
 DATE_SEANCES = "2026-06-06"
